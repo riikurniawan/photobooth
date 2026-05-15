@@ -1,5 +1,2 @@
 name = "photobooth"
 compatibility_date = "2026-05-15"
-
-[assets]
-directory = "./dist"
