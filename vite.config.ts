@@ -4,7 +4,7 @@ import solidPlugin from 'vite-plugin-solid';
 import devtools from 'solid-devtools/vite';
 
 export default defineConfig({
-  base: 'https://riikurniawan.github.io/photobooth/',
+  base: '',
   plugins: [devtools(), solidPlugin(), tailwindcss()],
   server: {
     port: 3000,
