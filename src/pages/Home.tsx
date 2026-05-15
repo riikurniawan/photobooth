@@ -1,5 +1,6 @@
 import { For, Show, createSignal, onCleanup } from 'solid-js';
 import type { Component } from 'solid-js';
+import Konva from 'konva';
 
 type CameraState = 'idle' | 'requesting' | 'active' | 'error';
 type LayoutTemplate = {
@@ -87,6 +88,170 @@ const blobToDataUrl = (blob: Blob) =>
   });
 const isValidShotData = (value: string | null): value is string =>
   typeof value === 'string' && value.startsWith('data:image/') && value.length > 100;
+const buildStripImageWithKonva = async (
+  layout: LayoutTemplate,
+  style: LayoutRenderStyle,
+  shotsForSave: string[],
+) => {
+  const slotWidth = 540;
+  const slotHeight = style.slotHeight;
+  const gap = style.slotGap;
+  const padding = 20;
+  const titleBand = 46;
+  const footerBand = 30;
+  const stripWidth = slotWidth + padding * 2;
+  const stripHeight =
+    padding + titleBand + layout.slots * slotHeight + (layout.slots - 1) * gap + footerBand + padding;
+  const shots = shotsForSave.slice(0, layout.slots);
+
+  const container = document.createElement('div');
+  container.style.position = 'fixed';
+  container.style.left = '-100000px';
+  container.style.top = '-100000px';
+  document.body.append(container);
+
+  const stage = new Konva.Stage({
+    container,
+    width: stripWidth,
+    height: stripHeight,
+  });
+  const layer = new Konva.Layer();
+  stage.add(layer);
+
+  try {
+    layer.add(
+      new Konva.Rect({
+        x: 0,
+        y: 0,
+        width: stripWidth,
+        height: stripHeight,
+        fill: style.background,
+      }),
+    );
+    layer.add(
+      new Konva.Rect({
+        x: 3,
+        y: 3,
+        width: stripWidth - 6,
+        height: stripHeight - 6,
+        stroke: '#111111',
+        strokeWidth: 6,
+      }),
+    );
+
+    layer.add(
+      new Konva.Text({
+        x: 0,
+        y: padding + 1,
+        width: stripWidth,
+        align: 'center',
+        text: style.title,
+        fill: style.titleColor,
+        fontStyle: 'bold',
+        fontSize: style.titleSize,
+        fontFamily: 'Inter, system-ui, sans-serif',
+      }),
+    );
+
+    for (let index = 0; index < layout.slots; index += 1) {
+      const slotX = padding;
+      const slotY = padding + titleBand + index * (slotHeight + gap);
+      const slotGroup = new Konva.Group({
+        clipX: slotX,
+        clipY: slotY,
+        clipWidth: slotWidth,
+        clipHeight: slotHeight,
+      });
+
+      slotGroup.add(
+        new Konva.Rect({
+          x: slotX,
+          y: slotY,
+          width: slotWidth,
+          height: slotHeight,
+          fill: style.slotBackground,
+        }),
+      );
+
+      const shot = shots[index];
+      if (!shot) {
+        slotGroup.add(
+          new Konva.Text({
+            x: slotX,
+            y: slotY + slotHeight / 2 - 10,
+            width: slotWidth,
+            align: 'center',
+            text: `Shot ${index + 1}`,
+            fill: '#4a4a4a',
+            fontStyle: 'bold',
+            fontSize: 18,
+            fontFamily: 'Inter, system-ui, sans-serif',
+          }),
+        );
+        layer.add(slotGroup);
+        layer.add(
+          new Konva.Rect({
+            x: slotX,
+            y: slotY,
+            width: slotWidth,
+            height: slotHeight,
+            stroke: style.slotBorder,
+            strokeWidth: 3,
+          }),
+        );
+        continue;
+      }
+
+      const image = await loadImageFromDataUrl(shot);
+      const scale = Math.max(slotWidth / image.width, slotHeight / image.height);
+      const drawWidth = image.width * scale;
+      const drawHeight = image.height * scale;
+      const drawX = slotX + (slotWidth - drawWidth) / 2;
+      const drawY = slotY + (slotHeight - drawHeight) / 2;
+
+      slotGroup.add(
+        new Konva.Image({
+          x: drawX,
+          y: drawY,
+          width: drawWidth,
+          height: drawHeight,
+          image,
+        }),
+      );
+      layer.add(slotGroup);
+      layer.add(
+        new Konva.Rect({
+          x: slotX,
+          y: slotY,
+          width: slotWidth,
+          height: slotHeight,
+          stroke: style.slotBorder,
+          strokeWidth: 3,
+        }),
+      );
+    }
+
+    layer.add(
+      new Konva.Text({
+        x: 0,
+        y: stripHeight - padding - 12,
+        width: stripWidth,
+        align: 'center',
+        text: style.footerText,
+        fill: style.footerColor,
+        fontStyle: 'bold',
+        fontSize: 14,
+        fontFamily: 'Inter, system-ui, sans-serif',
+      }),
+    );
+
+    layer.draw();
+    return stage.toDataURL({ mimeType: 'image/png', pixelRatio: 1 });
+  } finally {
+    stage.destroy();
+    container.remove();
+  }
+};
 
 const Home: Component = () => {
   const [cameraState, setCameraState] = createSignal<CameraState>('idle');
@@ -282,69 +447,10 @@ const Home: Component = () => {
 
     const layout = selectedLayout();
     const style = layoutRenderStyles[layout.id] ?? layoutRenderStyles['classic-4'];
-    const slotWidth = 540;
-    const slotHeight = style.slotHeight;
-    const gap = style.slotGap;
-    const padding = 20;
-    const titleBand = 46;
-    const footerBand = 30;
-
-    const canvas = document.createElement('canvas');
-    canvas.width = slotWidth + padding * 2;
-    canvas.height = padding + titleBand + layout.slots * slotHeight + (layout.slots - 1) * gap + footerBand + padding;
-    const context = canvas.getContext('2d');
-
-    if (!context) {
-      setCameraMessage('Could not generate strip image.');
-      return;
-    }
-
-    context.fillStyle = style.background;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.strokeStyle = '#111111';
-    context.lineWidth = 6;
-    context.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
-
-    context.fillStyle = style.titleColor;
-    context.font = `bold ${style.titleSize}px Inter, system-ui, sans-serif`;
-    context.textAlign = 'center';
-    context.fillText(style.title, canvas.width / 2, padding + 30);
-
     try {
-      const shots = shotsForSave.slice(0, layout.slots);
-      for (let index = 0; index < layout.slots; index += 1) {
-        const slotX = padding;
-        const slotY = padding + titleBand + index * (slotHeight + gap);
-
-        context.fillStyle = style.slotBackground;
-        context.fillRect(slotX, slotY, slotWidth, slotHeight);
-        context.strokeStyle = style.slotBorder;
-        context.lineWidth = 3;
-        context.strokeRect(slotX, slotY, slotWidth, slotHeight);
-
-        const shot = shots[index];
-        if (!shot) {
-          context.fillStyle = '#4a4a4a';
-          context.font = 'bold 18px Inter, system-ui, sans-serif';
-          context.fillText(`Shot ${index + 1}`, slotX + slotWidth / 2, slotY + slotHeight / 2 + 6);
-          continue;
-        }
-
-        const image = await loadImageFromDataUrl(shot);
-        const scale = Math.max(slotWidth / image.width, slotHeight / image.height);
-        const drawWidth = image.width * scale;
-        const drawHeight = image.height * scale;
-        const drawX = slotX + (slotWidth - drawWidth) / 2;
-        const drawY = slotY + (slotHeight - drawHeight) / 2;
-        context.drawImage(image, drawX, drawY, drawWidth, drawHeight);
-      }
-
-      context.fillStyle = style.footerColor;
-      context.font = 'bold 14px Inter, system-ui, sans-serif';
-      context.fillText(style.footerText, canvas.width / 2, canvas.height - padding);
-
+      const stripDataUrl = await buildStripImageWithKonva(layout, style, shotsForSave);
       const link = document.createElement('a');
-      link.href = canvas.toDataURL('image/png');
+      link.href = stripDataUrl;
       link.download = `photobooth-${layout.id}-${Date.now()}.png`;
       link.click();
       setCameraMessage('Strip saved to your device.');
